@@ -5,7 +5,6 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
-from dotenv import load_dotenv
 from telethon import TelegramClient, events
 from telethon.errors import FloodWaitError
 
@@ -70,6 +69,13 @@ def message_link(chat_id: int, username: str | None, msg_id: int) -> str | None:
 
     return None
 
+def _coerce_entity_ref(x):
+    if isinstance(x, str):
+        s = x.strip()
+        if s.lstrip("-").isdigit():
+            return int(s)
+    return x
+
 
 async def run_listener(
     name: str,
@@ -82,6 +88,7 @@ async def run_listener(
     me = await client.get_me()
     log.info("[listener:%s] ready as %s", name, getattr(me, "username", None) or me.id)
     # resolve sources once
+    sources = [_coerce_entity_ref(x) for x in sources]
     source_entities = [await client.get_entity(x) for x in sources]
     log.info("[listener:%s] sources resolved: %d", name, len(source_entities))
 
@@ -120,6 +127,7 @@ async def run_sender(
     queue: asyncio.Queue["ForwardEvent"],
     log: logging.Logger,
 ) -> None:
+    log.info("[sender] resolving target_chat=%r (type=%s)", target_chat, type(target_chat).__name__)
     target = await sender_client.get_entity(target_chat)
     log.info("[sender] ready, target resolved")
 
