@@ -1,0 +1,24 @@
+log:
+  level: INFO
+
+matcher:
+  keywords: ["urgent", "ошибка"]
+  regex: null
+
+target:
+  chat: "@my_channel"   # -100...
+
+send_via: "acc1"
+
+accounts:
+  - name: "acc1"
+    session: "sessions/acc1.session"
+    sources:
+      - "@chat_a"
+      - "-1001111111111"
+      - "https://t.me/+xxxxxxxxxxx"
+
+  - name: "acc2"
+    session: "sessions/acc2.session"
+    sources:
+      - "@chat_b"

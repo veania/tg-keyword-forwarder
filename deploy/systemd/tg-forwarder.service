@@ -1,0 +1,18 @@
+[Unit]
+Description=Telegram Keyword Forwarder
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/ABS/PATH/TO/tg-keyword-forwarder
+Environment=PYTHONPATH=src
+EnvironmentFile=/ABS/PATH/TO/tg-keyword-forwarder/.env
+ExecStart=/ABS/PATH/TO/tg-keyword-forwarder/.venv/bin/python -u -m tg_forwarder.app
+Restart=on-failure
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target
