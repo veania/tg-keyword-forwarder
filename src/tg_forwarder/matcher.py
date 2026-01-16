@@ -13,6 +13,7 @@ class KeywordMatcher:
     @classmethod
     def build(cls, keywords: list[str], keyword_regex: str | None) -> "KeywordMatcher":
         compiled = re.compile(keyword_regex) if keyword_regex else None
+        keywords = [k.lower() for k in keywords]
         return cls(keywords=keywords, regex=compiled)
 
     def matches(self, text: str) -> bool:

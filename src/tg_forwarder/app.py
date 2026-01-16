@@ -113,32 +113,66 @@ async def run_listener(
     await client.run_until_disconnected()
 
 
+
 async def run_sender(
     sender_client: TelegramClient,
     target_chat: str,
-    queue: asyncio.Queue[ForwardEvent],
+    queue: asyncio.Queue["ForwardEvent"],
     log: logging.Logger,
 ) -> None:
     target = await sender_client.get_entity(target_chat)
     log.info("[sender] ready, target resolved")
 
-    while True:
-        ev = await queue.get()
-        link = message_link(ev.chat_id, ev.chat_username, ev.msg_id)
-
-        header = (
-            # f"Account: {ev.account}\n"
+    def _make_header(ev: "ForwardEvent", link: str | None) -> str:
+        return (
             f"Source: {ev.chat_title}\n"
             f"Link: {link or 'n/a'}\n"
-            # f"Chat ID: {ev.chat_id}\n"
-            # f"Message ID: {ev.msg_id}"
         )
 
+    async def _send_header(ev: "ForwardEvent", link: str | None) -> None:
+        # header always as a separate message (as you had before)
+        header = _make_header(ev, link)
+        await sender_client.send_message(target, header, link_preview=False)
+
+    async def _send_copy(ev: "ForwardEvent", link: str | None) -> None:
+        # Keep header separate, then send message text (if any) as another message
+        # await _send_header(ev, link)
+
+        msg_text = (getattr(ev.message, "message", None) or "").strip()
+        if msg_text:
+            msg_text = msg_text[:3500]
+            await sender_client.send_message(target, msg_text, link_preview=False)
+
+    async def _deliver(ev: "ForwardEvent", *, send_header: bool = True) -> str:
+        link = message_link(ev.chat_id, ev.chat_username, ev.msg_id)
+
+        if send_header:
+            await _send_header(ev, link)
+
         try:
-            await sender_client.send_message(target, header)
             await sender_client.forward_messages(target, ev.message)
+            return "forward"
+        except FloodWaitError:
+            raise
+        except ValueError:
+            await _send_copy(ev, link)
+            return "copy"
+        except Exception:
+            log.exception(
+                "[sender] forward failed, falling back to copy "
+                "(source_account=%s chat=%s chat_id=%s msg_id=%s)",
+                ev.account, ev.chat_title, ev.chat_id, ev.msg_id
+            )
+            await _send_copy(ev, link)
+            return "copy"
+
+    while True:
+        ev = await queue.get()
+        try:
+            mode = await _deliver(ev, send_header=True)
             log.info(
-                "[sender] forwarded | via=%s | from=%s (chat_id=%s) msg_id=%s | to=%s",
+                "[sender] delivered | mode=%s | source_account=%s | from=%s (chat_id=%s) msg_id=%s | to=%s",
+                mode,
                 ev.account,
                 ev.chat_title,
                 ev.chat_id,
@@ -146,21 +180,42 @@ async def run_sender(
                 target_chat,
             )
         except FloodWaitError as ex:
-            log.warning("[sender] FloodWait %ss", ex.seconds)
-            await asyncio.sleep(ex.seconds)
-            await sender_client.send_message(target, header)
-            await sender_client.forward_messages(target, ev.message)
-            log.info(
-                "[sender] forwarded | via=%s | from=%s (chat_id=%s) msg_id=%s | to=%s",
+            log.warning(
+                "[sender] FloodWait %ss | will retry once | source_account=%s chat_id=%s msg_id=%s",
+                ex.seconds,
                 ev.account,
-                ev.chat_title,
                 ev.chat_id,
                 ev.msg_id,
-                target_chat,
             )
+            await asyncio.sleep(ex.seconds)
+
+            # retry once after waiting
+            try:
+                mode = await _deliver(ev, send_header=False)
+                log.info(
+                    "[sender] delivered_after_floodwait | mode=%s | source_account=%s | from=%s (chat_id=%s) msg_id=%s | to=%s",
+                    mode,
+                    ev.account,
+                    ev.chat_title,
+                    ev.chat_id,
+                    ev.msg_id,
+                    target_chat,
+                )
+            except Exception:
+                log.exception(
+                    "[sender] Failed to deliver after FloodWait "
+                    "(source_account=%s chat_id=%s msg_id=%s)",
+                    ev.account,
+                    ev.chat_id,
+                    ev.msg_id,
+                )
         except Exception:
-            log.exception("[sender] Failed to forward message (account=%s chat_id=%s msg_id=%s)",
-                        ev.account, ev.chat_id, ev.msg_id)
+            log.exception(
+                "[sender] Failed to deliver event (source_account=%s chat_id=%s msg_id=%s)",
+                ev.account,
+                ev.chat_id,
+                ev.msg_id,
+            )
         finally:
             queue.task_done()
 
